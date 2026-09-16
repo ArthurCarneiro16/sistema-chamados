@@ -3,7 +3,7 @@ Script para popular o banco com chamados de teste.
 Roda: python3 seed.py (ou py -3.14 seed.py)
 """
 from app import get_db, init_db, classificar_setor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 init_db()
 conn = get_db()
@@ -24,7 +24,7 @@ chamados_teste = [
 ]
 
 for dias_atras, setor_sol, nome_sol, item, nome_resp, status in chamados_teste:
-    data = (datetime.now() - timedelta(days=dias_atras)).strftime("%Y-%m-%d %H:%M:%S")
+    data = (datetime.now(timezone.utc) - timedelta(days=dias_atras)).strftime("%Y-%m-%d %H:%M:%S")
     setor_resp = classificar_setor(item)
     conn.execute(
         """INSERT INTO chamados

@@ -1,10 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import sqlite3
 import os
 
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "chamados.db")
+FUSO_BRASIL = ZoneInfo("America/Sao_Paulo")
 
 SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
 STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
@@ -26,6 +28,17 @@ CLASSIFICACAO = {
         "ar condicionado", "lampada", "lâmpada", "tomada", "encanamento",
         "vazamento", "porta", "janela", "eletrica", "elétrica", "infiltração",
     ],
+    "RH": [
+        "ferias", "férias", "salario", "salário", "holerite", "contracheque",
+        "admissao", "admissão", "demissao", "demissão", "rescisao", "rescisão",
+        "beneficio", "benefício", "vale transporte", "vale-transporte",
+        "vale alimentacao", "vale-alimentacao", "atestado", "plano de saude",
+        "plano de saúde", "ponto", "banco de horas", "advertencia", "advertência",
+    ],
+    "Financeiro": [
+        "reembolso", "nota fiscal", "pagamento", "boleto", "fatura",
+        "despesa", "adiantamento", "nota de debito", "centro de custo",
+    ],
 }
 
 
@@ -43,11 +56,17 @@ def get_db():
     return conn
 
 
+def agora_utc_str():
+    """Timestamp atual em UTC, no formato salvo no banco."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def formatar_data_br(data_iso):
-    """Converte '2026-09-16 15:30:00' -> '16/09/2026 15:30'."""
+    """Converte um timestamp UTC salvo no banco para horário de Brasília."""
     try:
-        dt = datetime.strptime(data_iso, "%Y-%m-%d %H:%M:%S")
-        return dt.strftime("%d/%m/%Y %H:%M")
+        dt_utc = datetime.strptime(data_iso, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        dt_br = dt_utc.astimezone(FUSO_BRASIL)
+        return dt_br.strftime("%d/%m/%Y %H:%M")
     except (ValueError, TypeError):
         return data_iso
 
@@ -125,7 +144,7 @@ def novo_chamado():
                 item_solicitado, setor_responsavel, nome_responsavel, status)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                agora_utc_str(),
                 request.form["setor_solicitante"],
                 request.form["nome_solicitante"],
                 item_solicitado,
