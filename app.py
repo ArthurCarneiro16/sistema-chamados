@@ -1,0 +1,173 @@
+from flask import Flask, render_template, request, redirect, url_for
+from datetime import datetime
+import sqlite3
+import os
+
+app = Flask(__name__)
+DB_PATH = os.path.join(os.path.dirname(__file__), "chamados.db")
+
+SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
+STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
+
+# Palavra-chave -> setor responsável. O sistema decide sozinho quem atende,
+# quem abre o chamado não escolhe isso.
+CLASSIFICACAO = {
+    "Almoxarifado": [
+        "mouse", "teclado", "monitor", "cadeira", "mesa", "papel", "caneta",
+        "grampeador", "toner", "cartucho", "headset", "fone", "mochila",
+        "pasta", "caixa", "material de escritorio", "notebook", "cabo",
+    ],
+    "TI": [
+        "senha", "internet", "rede", "wifi", "sistema", "software", "login",
+        "acesso", "impressora", "computador travando", "email", "e-mail",
+        "instalar", "formatar", "antivirus", "vpn", "servidor",
+    ],
+    "Manutenção": [
+        "ar condicionado", "lampada", "lâmpada", "tomada", "encanamento",
+        "vazamento", "porta", "janela", "eletrica", "elétrica", "infiltração",
+    ],
+}
+
+
+def classificar_setor(item_texto):
+    texto = item_texto.lower()
+    for setor, palavras in CLASSIFICACAO.items():
+        if any(p in texto for p in palavras):
+            return setor
+    return "Não classificado"
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def formatar_data_br(data_iso):
+    """Converte '2026-09-16 15:30:00' -> '16/09/2026 15:30'."""
+    try:
+        dt = datetime.strptime(data_iso, "%Y-%m-%d %H:%M:%S")
+        return dt.strftime("%d/%m/%Y %H:%M")
+    except (ValueError, TypeError):
+        return data_iso
+
+
+app.jinja_env.filters["br_data"] = formatar_data_br
+
+
+def init_db():
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chamados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_solicitacao TEXT NOT NULL,
+            setor_solicitante TEXT NOT NULL,
+            nome_solicitante TEXT NOT NULL,
+            item_solicitado TEXT NOT NULL,
+            setor_responsavel TEXT NOT NULL,
+            nome_responsavel TEXT,
+            status TEXT NOT NULL DEFAULT 'Aberto'
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+@app.route("/")
+def index():
+    conn = get_db()
+    filtro_status = request.args.get("status", "")
+    filtro_setor = request.args.get("setor_responsavel", "")
+    ordem = request.args.get("ordem", "recentes")
+    if ordem not in ("recentes", "antigos"):
+        ordem = "recentes"
+
+    query = "SELECT * FROM chamados WHERE 1=1"
+    params = []
+    if filtro_status:
+        query += " AND status = ?"
+        params.append(filtro_status)
+    if filtro_setor:
+        query += " AND setor_responsavel = ?"
+        params.append(filtro_setor)
+
+    if ordem == "recentes":
+        query += " ORDER BY data_solicitacao DESC"
+    else:
+        query += " ORDER BY data_solicitacao ASC"
+
+    proxima_ordem = "antigos" if ordem == "recentes" else "recentes"
+
+    chamados = conn.execute(query, params).fetchall()
+    conn.close()
+    return render_template(
+        "index.html",
+        chamados=chamados,
+        setores=SETORES,
+        status_opcoes=STATUS_OPCOES,
+        filtro_status=filtro_status,
+        filtro_setor=filtro_setor,
+        ordem=ordem,
+        proxima_ordem=proxima_ordem,
+    )
+
+
+@app.route("/novo", methods=["GET", "POST"])
+def novo_chamado():
+    if request.method == "POST":
+        item_solicitado = request.form["item_solicitado"]
+        setor_responsavel = classificar_setor(item_solicitado)
+
+        conn = get_db()
+        conn.execute(
+            """INSERT INTO chamados
+               (data_solicitacao, setor_solicitante, nome_solicitante,
+                item_solicitado, setor_responsavel, nome_responsavel, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                request.form["setor_solicitante"],
+                request.form["nome_solicitante"],
+                item_solicitado,
+                setor_responsavel,
+                "",
+                "Aberto",
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return redirect(url_for("index"))
+
+    return render_template("novo.html", setores=SETORES)
+
+
+@app.route("/chamado/<int:chamado_id>/status", methods=["POST"])
+def atualizar_status(chamado_id):
+    novo_status = request.form["status"]
+    nome_responsavel = request.form.get("nome_responsavel", "")
+    conn = get_db()
+    conn.execute(
+        "UPDATE chamados SET status = ?, nome_responsavel = ? WHERE id = ?",
+        (novo_status, nome_responsavel, chamado_id),
+    )
+    conn.commit()
+    conn.close()
+    return redirect(url_for("index"))
+
+
+if __name__ == "__main__":
+    import socket
+
+    init_db()
+    try:
+        ip_local = socket.gethostbyname(socket.gethostname())
+    except Exception:
+        ip_local = "127.0.0.1"
+
+    print("=" * 50)
+    print("Sistema de Chamados rodando.")
+    print(f"Neste computador:        http://localhost:5000")
+    print(f"Outros PCs da mesma rede: http://{ip_local}:5000")
+    print("=" * 50)
+
+    app.run(host="0.0.0.0", port=5000, debug=True)

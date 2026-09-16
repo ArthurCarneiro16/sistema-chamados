@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+    <h2>Abrir novo chamado</h2>
+</div>
+
+<form method="post" class="form-novo card">
+    <label>Setor solicitante</label>
+    <select name="setor_solicitante" required>
+        {% for s in setores %}
+        <option value="{{ s }}">{{ s }}</option>
+        {% endfor %}
+    </select>
+
+    <label>Nome de quem solicitou</label>
+    <input type="text" name="nome_solicitante" required>
+
+    <label>Item / serviço solicitado</label>
+    <textarea name="item_solicitado" placeholder="Ex: 1 mouse e 1 monitor" required></textarea>
+    <small>O setor responsável é identificado automaticamente pelo sistema, com base no item descrito.</small>
+
+    <button type="submit">Abrir chamado</button>
+</form>
+
+{% endblock %}
+

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+    <h2>Chamados</h2>
+    <span class="contador">{{ chamados|length }} chamado(s)</span>
+</div>
+
+<form class="filtros" method="get">
+    <input type="hidden" name="ordem" value="{{ ordem }}">
+    <select name="status">
+        <option value="">Todos os status</option>
+        {% for s in status_opcoes %}
+        <option value="{{ s }}" {% if s == filtro_status %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+    </select>
+
+    <select name="setor_responsavel">
+        <option value="">Todos os setores</option>
+        {% for s in setores %}
+        <option value="{{ s }}" {% if s == filtro_setor %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+    </select>
+
+    <button type="submit">Filtrar</button>
+</form>
+
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th class="col-id">#</th>
+                    <th class="col-data">
+                        <a href="{{ url_for('index', ordem=proxima_ordem, status=filtro_status, setor_responsavel=filtro_setor) }}" class="th-link">
+                            Data
+                            {% if ordem == "recentes" %}
+                                <span class="th-arrow" title="Mostrando mais recentes primeiro">▼ recentes</span>
+                            {% else %}
+                                <span class="th-arrow" title="Mostrando mais antigos primeiro">▲ antigos</span>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th class="col-nome">Solicitante</th>
+                    <th class="col-setor">Setor solicitante</th>
+                    <th class="col-item">Item</th>
+                    <th class="col-setor">Setor responsável</th>
+                    <th class="col-nome">Responsável</th>
+                    <th class="col-status">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in chamados %}
+                <tr>
+                    <td class="col-id">{{ c.id }}</td>
+                    <td class="col-data">{{ c.data_solicitacao|br_data }}</td>
+                    <td class="col-nome">{{ c.nome_solicitante }}</td>
+                    <td class="col-setor">{{ c.setor_solicitante }}</td>
+                    <td class="col-item">{{ c.item_solicitado }}</td>
+                    <td class="col-setor">
+                        <span class="tag {% if c.setor_responsavel == 'Não classificado' %}tag-alerta{% endif %}">
+                            {{ c.setor_responsavel }}
+                        </span>
+                    </td>
+                    <td class="col-nome" colspan="1">
+                        <form method="post" action="{{ url_for('atualizar_status', chamado_id=c.id) }}" class="form-inline" id="form-{{ c.id }}">
+                            <input type="text" name="nome_responsavel" placeholder="—"
+                                   value="{{ c.nome_responsavel or '' }}"
+                                   data-original="{{ c.nome_responsavel or '' }}"
+                                   form="form-{{ c.id }}"
+                                   onchange="if(this.value !== this.dataset.original){ this.form.submit(); }">
+                        </form>
+                    </td>
+                    <td class="col-status">
+                        <select name="status" form="form-{{ c.id }}"
+                                class="status-select status-{{ c.status|replace(' ', '-')|lower }}"
+                                onchange="this.className='status-select status-' + this.value.replace(' ', '-').toLowerCase(); this.form.submit();">
+                            {% for s in status_opcoes %}
+                            <option value="{{ s }}" {% if s == c.status %}selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="vazio">Nenhum chamado encontrado.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}
