@@ -56,7 +56,13 @@
                     <td class="col-data">{{ c.data_solicitacao|br_data }}</td>
                     <td class="col-nome">{{ c.nome_solicitante }}</td>
                     <td class="col-setor">{{ c.setor_solicitante }}</td>
-                    <td class="col-item">{{ c.item_solicitado }}</td>
+                    <td class="col-item">
+                        <span class="item-truncado"
+                              data-item="{{ c.item_solicitado }}"
+                              title="Clique para ver o item completo">
+                            {{ c.item_solicitado }}
+                        </span>
+                    </td>
                     <td class="col-setor">
                         <span class="tag {% if c.setor_responsavel == 'Não classificado' %}tag-alerta{% endif %}">
                             {{ c.setor_responsavel }}
@@ -88,5 +94,39 @@
         </table>
     </div>
 </div>
+
+<!-- ============ MODAL DO ITEM ============ -->
+<div id="modalItem" class="modal-overlay" onclick="if(event.target === this) fecharModal()">
+    <div class="modal-caixa">
+        <div class="modal-header">
+            <h3>Item do chamado</h3>
+            <span class="modal-fechar" onclick="fecharModal()">&times;</span>
+        </div>
+        <div class="modal-corpo">
+            <p id="modalTexto"></p>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Abre o modal ao clicar em qualquer item truncado
+        document.querySelectorAll('.item-truncado').forEach(function (el) {
+            el.addEventListener('click', function () {
+                document.getElementById('modalTexto').textContent = this.dataset.item || '';
+                document.getElementById('modalItem').classList.add('aberto');
+            });
+        });
+
+        // Fecha com ESC
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') fecharModal();
+        });
+    });
+
+    function fecharModal() {
+        document.getElementById('modalItem').classList.remove('aberto');
+    }
+</script>
 
 {% endblock %}

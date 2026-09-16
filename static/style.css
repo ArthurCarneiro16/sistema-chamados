@@ -137,7 +137,7 @@ th, td {
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
 }
-.col-item { white-space: normal; min-width: 200px; }
+.col-item { white-space: normal; min-width: 200px; max-width: 280px; }
 th {
     background: #f9fafb;
     color: var(--text-muted);
@@ -202,8 +202,82 @@ tbody tr:hover { background: #f9fafb; }
 .form-novo small { color: var(--text-muted); margin-top: -6px; }
 .form-novo button { margin-top: 8px; padding: 10px; }
 
+/* ---------- item truncado ---------- */
+.item-truncado {
+    display: block;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    color: var(--primary);
+}
+.item-truncado:hover {
+    text-decoration: underline;
+}
+
+/* ---------- modal ---------- */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+.modal-overlay.aberto {
+    display: flex;
+}
+.modal-caixa {
+    background: white;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 560px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    overflow: hidden;
+    animation: modalIn 0.15s ease-out;
+}
+@keyframes modalIn {
+    from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+}
+.modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text);
+}
+.modal-fechar {
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--text-muted);
+    user-select: none;
+}
+.modal-fechar:hover { color: var(--text); }
+.modal-corpo {
+    padding: 20px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+.modal-corpo p {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.55;
+}
+
 /* ---------- responsivo ---------- */
 @media (max-width: 640px) {
     .header-inner { flex-direction: column; align-items: flex-start; }
     main { padding: 16px; }
+    .item-truncado { max-width: 180px; }
 }
