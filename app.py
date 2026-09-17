@@ -5,6 +5,7 @@ import sqlite3
 import os
 import csv
 import io
+import requests
 
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "chamados.db")
@@ -12,6 +13,10 @@ FUSO_BRASIL = ZoneInfo("America/Sao_Paulo")
 
 SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
 STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
+
+# --- Telegram ---
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 CLASSIFICACAO = {
     "Almoxarifado": [
@@ -70,6 +75,23 @@ def formatar_data_br(data_iso):
 
 
 app.jinja_env.filters["br_data"] = formatar_data_br
+
+
+def enviar_notificacao_telegram(mensagem):
+    """Envia mensagem via Telegram se as variáveis estiverem configuradas."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": mensagem,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"[Telegram] Erro ao enviar notificação: {e}")
 
 
 def init_db():
@@ -134,25 +156,41 @@ def novo_chamado():
     if request.method == "POST":
         item_solicitado = request.form["item_solicitado"]
         setor_responsavel = classificar_setor(item_solicitado)
+        nome_solicitante = request.form["nome_solicitante"]
+        setor_solicitante = request.form["setor_solicitante"]
 
         conn = get_db()
-        conn.execute(
+        cursor = conn.execute(
             """INSERT INTO chamados
                (data_solicitacao, setor_solicitante, nome_solicitante,
                 item_solicitado, setor_responsavel, nome_responsavel, status)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 agora_utc_str(),
-                request.form["setor_solicitante"],
-                request.form["nome_solicitante"],
+                setor_solicitante,
+                nome_solicitante,
                 item_solicitado,
                 setor_responsavel,
                 "",
                 "Aberto",
             ),
         )
+        novo_id = cursor.lastrowid
         conn.commit()
         conn.close()
+
+        # Notifica via Telegram
+        data_br = datetime.now(FUSO_BRASIL).strftime("%d/%m/%Y às %H:%M")
+        mensagem = (
+            f"🔔 <b>Novo chamado #{novo_id}</b>\n\n"
+            f"📅 <b>Data:</b> {data_br}\n"
+            f"👤 <b>Solicitante:</b> {nome_solicitante}\n"
+            f"🏢 <b>Setor solicitante:</b> {setor_solicitante}\n"
+            f"🎯 <b>Setor responsável:</b> {setor_responsavel}\n"
+            f"📦 <b>Item:</b> {item_solicitado}"
+        )
+        enviar_notificacao_telegram(mensagem)
+
         return redirect(url_for("index"))
 
     return render_template("novo.html", setores=SETORES)

@@ -3,3 +3,4 @@ waitress
 tzdata
 openpyxl
 reportlab
+requests
