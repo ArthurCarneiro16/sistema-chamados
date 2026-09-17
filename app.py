@@ -4,16 +4,6 @@ from zoneinfo import ZoneInfo
 import sqlite3
 import os
 
-# --- Conexão com o Turso (produção) ou SQLite local (desenvolvimento) ---
-try:
-    import libsql
-    HAS_LIBSQL = True
-except ImportError:
-    HAS_LIBSQL = False
-
-TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
-
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "chamados.db")
 FUSO_BRASIL = ZoneInfo("America/Sao_Paulo")
@@ -21,6 +11,8 @@ FUSO_BRASIL = ZoneInfo("America/Sao_Paulo")
 SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
 STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
 
+# Palavra-chave -> setor responsável. O sistema decide sozinho quem atende,
+# quem abre o chamado não escolhe isso.
 CLASSIFICACAO = {
     "Almoxarifado": [
         "mouse", "teclado", "monitor", "cadeira", "mesa", "papel", "caneta",
@@ -59,20 +51,18 @@ def classificar_setor(item_texto):
 
 
 def get_db():
-    """Conecta no Turso (produção) ou no SQLite local (desenvolvimento)."""
-    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and HAS_LIBSQL:
-        conn = libsql.connect(TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
-    else:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def agora_utc_str():
+    """Timestamp atual em UTC, no formato salvo no banco."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def formatar_data_br(data_iso):
+    """Converte um timestamp UTC salvo no banco para horário de Brasília."""
     try:
         dt_utc = datetime.strptime(data_iso, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         dt_br = dt_utc.astimezone(FUSO_BRASIL)

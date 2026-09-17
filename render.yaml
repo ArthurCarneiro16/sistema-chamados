@@ -1,9 +1,6 @@
 services:
   - type: web
     name: sistema-chamados
-    runtime: python
-    plan: free
-    branch: main
+    env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
-    autoDeployTrigger: commit
+    startCommand: python serve.py
