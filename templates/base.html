@@ -20,7 +20,7 @@
                 <a href="{{ url_for('relatorios') }}">Relatórios</a>
                 <a href="{{ url_for('novo_chamado') }}" class="nav-cta">+ Novo chamado</a>
                 {% if logado %}
-                    <span class="nav-user">👤 {{ usuario }}</span>
+                    <span class="nav-user">👤 {{ usuario_nome }}</span>
                     <button type="button" class="nav-logout" onclick="fazerLogout()">Sair</button>
                 {% else %}
                     <button type="button" class="nav-login" onclick="abrirLogin()">Entrar</button>
@@ -32,7 +32,7 @@
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Modal de Login (global, disponível em todas as páginas) -->
+    <!-- Modal de Login -->
     <div id="modalLogin" class="modal-overlay" onclick="if(event.target === this) fecharLogin()">
         <div class="modal-caixa modal-caixa-pequena">
             <div class="modal-header">
@@ -43,12 +43,9 @@
                 <div class="form-login">
                     <label>Usuário</label>
                     <input type="text" id="loginUsuario" autocomplete="username" autofocus>
-
                     <label>Senha</label>
                     <input type="password" id="loginSenha" autocomplete="current-password">
-
                     <div id="loginErro" class="login-erro" style="display:none;"></div>
-
                     <button type="button" onclick="submitLogin()">Entrar</button>
                 </div>
             </div>
@@ -63,41 +60,24 @@
             document.getElementById('modalLogin').classList.add('aberto');
             setTimeout(() => document.getElementById('loginUsuario').focus(), 50);
         }
-
-        function fecharLogin() {
-            document.getElementById('modalLogin').classList.remove('aberto');
-        }
+        function fecharLogin() { document.getElementById('modalLogin').classList.remove('aberto'); }
 
         async function submitLogin() {
             const usuario = document.getElementById('loginUsuario').value.trim();
             const senha = document.getElementById('loginSenha').value;
             const erroDiv = document.getElementById('loginErro');
-
-            const resposta = await fetch('/api/login', {
+            const r = await fetch('/api/login', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({usuario, senha})
             });
-
-            if (resposta.ok) {
-                fecharLogin();
-                location.reload();
-            } else {
-                erroDiv.textContent = 'Usuário ou senha incorretos.';
-                erroDiv.style.display = 'block';
-            }
+            if (r.ok) { fecharLogin(); location.reload(); }
+            else { erroDiv.textContent = 'Usuário ou senha incorretos.'; erroDiv.style.display = 'block'; }
         }
+        async function fazerLogout() { await fetch('/api/logout', {method: 'POST'}); location.reload(); }
 
-        async function fazerLogout() {
-            await fetch('/api/logout', {method: 'POST'});
-            location.reload();
-        }
-
-        // Enter para logar
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && document.getElementById('modalLogin').classList.contains('aberto')) {
-                submitLogin();
-            }
+            if (e.key === 'Enter' && document.getElementById('modalLogin').classList.contains('aberto')) submitLogin();
             if (e.key === 'Escape') {
                 fecharLogin();
                 if (typeof fecharHistorico === 'function') fecharHistorico();

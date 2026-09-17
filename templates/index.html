@@ -14,14 +14,12 @@
         <option value="{{ s }}" {% if s == filtro_status %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
     </select>
-
     <select name="setor_responsavel">
         <option value="">Todos os setores</option>
         {% for s in setores %}
         <option value="{{ s }}" {% if s == filtro_setor %}selected{% endif %}>{{ s }}</option>
         {% endfor %}
     </select>
-
     <button type="submit">Filtrar</button>
 </form>
 
@@ -35,19 +33,19 @@
                         <a href="{{ url_for('index', ordem=proxima_ordem, status=filtro_status, setor_responsavel=filtro_setor) }}" class="th-link">
                             Data
                             {% if ordem == "recentes" %}
-                                <span class="th-arrow" title="Mostrando mais recentes primeiro">▼ recentes</span>
+                                <span class="th-arrow">▼</span>
                             {% else %}
-                                <span class="th-arrow" title="Mostrando mais antigos primeiro">▲ antigos</span>
+                                <span class="th-arrow">▲</span>
                             {% endif %}
                         </a>
                     </th>
                     <th class="col-nome">Solicitante</th>
-                    <th class="col-setor">Setor solicitante</th>
+                    <th class="col-setor">Setor solic.</th>
                     <th class="col-item">Item</th>
-                    <th class="col-setor">Setor responsável</th>
+                    <th class="col-setor">Setor resp.</th>
                     <th class="col-nome">Responsável</th>
                     <th class="col-status">Status</th>
-                    <th class="col-acoes">Histórico</th>
+                    <th class="col-acoes">Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -95,9 +93,16 @@
                         {% endif %}
                     </td>
                     <td class="col-acoes">
-                        <button type="button" class="btn-historico" title="Ver histórico" onclick="abrirHistorico({{ c.id }})">
-                            📜
-                        </button>
+                        <div class="acoes-wrap">
+                            <button type="button" class="btn-icone" title="Ver histórico" onclick="abrirHistorico({{ c.id }})">📜</button>
+                            {% if logado %}
+                            <form method="post" action="{{ url_for('excluir_chamado', chamado_id=c.id) }}"
+                                  onsubmit="return confirm('Excluir o chamado #{{ c.id }}? Esta ação não pode ser desfeita.');"
+                                  style="display:inline;">
+                                <button type="submit" class="btn-icone btn-excluir" title="Excluir chamado">🗑️</button>
+                            </form>
+                            {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% else %}
@@ -108,20 +113,18 @@
     </div>
 </div>
 
-<!-- ============ MODAL DO ITEM ============ -->
+<!-- Modal item -->
 <div id="modalItem" class="modal-overlay" onclick="if(event.target === this) fecharModal()">
     <div class="modal-caixa">
         <div class="modal-header">
             <h3>Item do chamado</h3>
             <span class="modal-fechar" onclick="fecharModal()">&times;</span>
         </div>
-        <div class="modal-corpo">
-            <p id="modalTexto"></p>
-        </div>
+        <div class="modal-corpo"><p id="modalTexto"></p></div>
     </div>
 </div>
 
-<!-- ============ MODAL DE HISTÓRICO ============ -->
+<!-- Modal histórico -->
 <div id="modalHistorico" class="modal-overlay" onclick="if(event.target === this) fecharHistorico()">
     <div class="modal-caixa">
         <div class="modal-header">
@@ -130,45 +133,33 @@
         </div>
         <div class="modal-corpo">
             <div id="historicoInfo" class="historico-info"></div>
-            <div id="historicoLista" class="historico-lista-wrap"></div>
+            <div id="historicoLista"></div>
         </div>
     </div>
 </div>
 
 <script>
-    // ---- Modal do item ----
-    document.addEventListener('DOMContentLoaded', function () {
-        document.querySelectorAll('.item-truncado').forEach(function (el) {
-            el.addEventListener('click', function () {
-                document.getElementById('modalTexto').textContent = this.dataset.item || '';
-                document.getElementById('modalItem').classList.add('aberto');
-            });
+    document.querySelectorAll('.item-truncado').forEach(function (el) {
+        el.addEventListener('click', function () {
+            document.getElementById('modalTexto').textContent = this.dataset.item || '';
+            document.getElementById('modalItem').classList.add('aberto');
         });
     });
+    function fecharModal() { document.getElementById('modalItem').classList.remove('aberto'); }
 
-    function fecharModal() {
-        document.getElementById('modalItem').classList.remove('aberto');
-    }
-
-    // ---- Modal do histórico ----
     async function abrirHistorico(id) {
         try {
-            const resposta = await fetch(`/api/chamado/${id}/historico`);
-            if (!resposta.ok) {
-                alert('Não foi possível carregar o histórico.');
-                return;
-            }
-            const dados = await resposta.json();
+            const r = await fetch(`/api/chamado/${id}/historico`);
+            if (!r.ok) { alert('Não foi possível carregar o histórico.'); return; }
+            const dados = await r.json();
 
             document.getElementById('historicoTitulo').textContent = `Histórico do chamado #${dados.chamado.id}`;
-
-            const info = document.getElementById('historicoInfo');
-            info.innerHTML = `
-                <p><strong>Solicitante:</strong> ${escapeHtml(dados.chamado.solicitante)}</p>
-                <p><strong>Setor solicitante:</strong> ${escapeHtml(dados.chamado.setor_solicitante)}</p>
-                <p><strong>Item:</strong> ${escapeHtml(dados.chamado.item)}</p>
-                <p><strong>Setor responsável:</strong> ${escapeHtml(dados.chamado.setor_responsavel)}</p>
-                <p><strong>Status atual:</strong> ${escapeHtml(dados.chamado.status)}</p>
+            document.getElementById('historicoInfo').innerHTML = `
+                <p><strong>Solicitante:</strong> ${esc(dados.chamado.solicitante)}</p>
+                <p><strong>Setor solicitante:</strong> ${esc(dados.chamado.setor_solicitante)}</p>
+                <p><strong>Item:</strong> ${esc(dados.chamado.item)}</p>
+                <p><strong>Setor responsável:</strong> ${esc(dados.chamado.setor_responsavel)}</p>
+                <p><strong>Status atual:</strong> ${esc(dados.chamado.status)}</p>
             `;
 
             const lista = document.getElementById('historicoLista');
@@ -179,35 +170,23 @@
                     dados.historico.map(h => `
                         <li class="historico-item">
                             <div class="historico-meta">
-                                <span class="historico-data">${escapeHtml(h.data)}</span>
-                                <span class="historico-user">👤 ${escapeHtml(h.usuario)}</span>
+                                <span>${esc(h.data)}</span>
+                                <span>👤 ${esc(h.usuario)}</span>
                             </div>
                             <div class="historico-mudanca">
-                                <strong>${escapeHtml(h.campo)}</strong>:
-                                <span class="de">${escapeHtml(h.de)}</span>
+                                <strong>${esc(h.campo)}</strong>:
+                                <span class="de">${esc(h.de)}</span>
                                 <span class="seta">→</span>
-                                <span class="para">${escapeHtml(h.para)}</span>
+                                <span class="para">${esc(h.para)}</span>
                             </div>
                         </li>
                     `).join('') + '</ul>';
             }
-
             document.getElementById('modalHistorico').classList.add('aberto');
-        } catch (e) {
-            console.error(e);
-            alert('Erro ao carregar histórico.');
-        }
+        } catch (e) { console.error(e); alert('Erro ao carregar histórico.'); }
     }
-
-    function fecharHistorico() {
-        document.getElementById('modalHistorico').classList.remove('aberto');
-    }
-
-    function escapeHtml(texto) {
-        const div = document.createElement('div');
-        div.textContent = texto == null ? '' : String(texto);
-        return div.innerHTML;
-    }
+    function fecharHistorico() { document.getElementById('modalHistorico').classList.remove('aberto'); }
+    function esc(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
 </script>
 
 {% endblock %}

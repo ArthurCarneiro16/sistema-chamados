@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash
+from flask import Flask, render_template, request, redirect, url_for, send_file, session, jsonify
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
@@ -19,7 +19,16 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
 
 # --- Telegram ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID_PADRAO = os.environ.get("TELEGRAM_CHAT_ID")
+# Chat por setor (opcional). Se o setor não tiver chat, usa o padrão.
+TELEGRAM_CHAT_IDS = {
+    "TI": os.environ.get("TELEGRAM_CHAT_TI"),
+    "RH": os.environ.get("TELEGRAM_CHAT_RH"),
+    "Financeiro": os.environ.get("TELEGRAM_CHAT_FIN"),
+    "Almoxarifado": os.environ.get("TELEGRAM_CHAT_ALMOX"),
+    "Manutenção": os.environ.get("TELEGRAM_CHAT_MANUT"),
+    "ADM": os.environ.get("TELEGRAM_CHAT_ADM"),
+}
 
 SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
 STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
@@ -84,19 +93,21 @@ app.jinja_env.filters["br_data"] = formatar_data_br
 
 
 # --- Autenticação ---
-def login_required_api(f):
-    """Para rotas AJAX: retorna 401 se não estiver logado."""
+def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         if not session.get("logado"):
-            return {"ok": False, "erro": "precisa_login"}, 401
+            return redirect(url_for("index"))
         return f(*args, **kwargs)
     return wrapper
 
 
 @app.context_processor
 def injetar_estado_login():
-    return {"logado": bool(session.get("logado")), "usuario": session.get("usuario", "")}
+    return {
+        "logado": bool(session.get("logado")),
+        "usuario_nome": session.get("usuario", ""),
+    }
 
 
 @app.route("/api/login", methods=["POST"])
@@ -107,14 +118,14 @@ def api_login():
     if usuario == ADMIN_USER and senha == ADMIN_PASSWORD:
         session["logado"] = True
         session["usuario"] = usuario
-        return {"ok": True, "usuario": usuario}
-    return {"ok": False, "erro": "credenciais_invalidas"}, 401
+        return jsonify({"ok": True, "usuario": usuario})
+    return jsonify({"ok": False, "erro": "credenciais_invalidas"}), 401
 
 
 @app.route("/api/logout", methods=["POST"])
 def api_logout():
     session.clear()
-    return {"ok": True}
+    return jsonify({"ok": True})
 
 
 # --- Histórico ---
@@ -123,31 +134,32 @@ def registrar_historico(conn, chamado_id, campo, valor_antigo, valor_novo):
         """INSERT INTO historico
            (chamado_id, campo, valor_antigo, valor_novo, usuario, data)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        (
-            chamado_id,
-            campo,
-            valor_antigo or "—",
-            valor_novo or "—",
-            session.get("usuario", "sistema"),
-            agora_utc_str(),
-        ),
+        (chamado_id, campo, valor_antigo or "—", valor_novo or "—",
+         session.get("usuario", "sistema"), agora_utc_str()),
     )
 
 
-def enviar_notificacao_telegram(mensagem):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+# --- Telegram ---
+def enviar_notificacao_telegram(mensagem, setor=None):
+    """Envia pro chat do setor responsável. Se não tiver, usa o padrão."""
+    if not TELEGRAM_TOKEN:
+        return
+    chat_id = (TELEGRAM_CHAT_IDS.get(setor) if setor else None) or TELEGRAM_CHAT_ID_PADRAO
+    if not chat_id:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": chat_id,
         "text": mensagem,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
     try:
-        requests.post(url, json=payload, timeout=5)
+        r = requests.post(url, json=payload, timeout=5)
+        if not r.ok:
+            print(f"[Telegram] Erro {r.status_code}: {r.text}")
     except Exception as e:
-        print(f"[Telegram] Erro ao enviar notificação: {e}")
+        print(f"[Telegram] Exceção: {e}")
 
 
 def init_db():
@@ -197,11 +209,7 @@ def index():
         query += " AND setor_responsavel = ?"
         params.append(filtro_setor)
 
-    if ordem == "recentes":
-        query += " ORDER BY data_solicitacao DESC"
-    else:
-        query += " ORDER BY data_solicitacao ASC"
-
+    query += " ORDER BY data_solicitacao " + ("DESC" if ordem == "recentes" else "ASC")
     proxima_ordem = "antigos" if ordem == "recentes" else "recentes"
 
     chamados = conn.execute(query, params).fetchall()
@@ -232,15 +240,8 @@ def novo_chamado():
                (data_solicitacao, setor_solicitante, nome_solicitante,
                 item_solicitado, setor_responsavel, nome_responsavel, status)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                agora_utc_str(),
-                setor_solicitante,
-                nome_solicitante,
-                item_solicitado,
-                setor_responsavel,
-                "",
-                "Aberto",
-            ),
+            (agora_utc_str(), setor_solicitante, nome_solicitante,
+             item_solicitado, setor_responsavel, "", "Aberto"),
         )
         novo_id = cursor.lastrowid
         conn.commit()
@@ -255,7 +256,8 @@ def novo_chamado():
             f"🎯 <b>Setor responsável:</b> {setor_responsavel}\n"
             f"📦 <b>Item:</b> {item_solicitado}"
         )
-        enviar_notificacao_telegram(mensagem)
+        # Manda pro Telegram do setor responsável (ou padrão como fallback)
+        enviar_notificacao_telegram(mensagem, setor=setor_responsavel)
 
         return redirect(url_for("index"))
 
@@ -263,7 +265,7 @@ def novo_chamado():
 
 
 @app.route("/chamado/<int:chamado_id>/status", methods=["POST"])
-@login_required_api
+@login_required
 def atualizar_status(chamado_id):
     novo_status = request.form["status"]
     nome_responsavel = request.form.get("nome_responsavel", "")
@@ -272,7 +274,7 @@ def atualizar_status(chamado_id):
     chamado = conn.execute("SELECT * FROM chamados WHERE id = ?", (chamado_id,)).fetchone()
     if not chamado:
         conn.close()
-        return {"ok": False, "erro": "nao_encontrado"}, 404
+        return redirect(url_for("index"))
 
     if chamado["status"] != novo_status:
         registrar_historico(conn, chamado_id, "status", chamado["status"], novo_status)
@@ -285,9 +287,17 @@ def atualizar_status(chamado_id):
     )
     conn.commit()
     conn.close()
+    return redirect(url_for("index"))
 
-    if request.headers.get("X-Requested-With") == "fetch":
-        return {"ok": True}
+
+@app.route("/chamado/<int:chamado_id>/excluir", methods=["POST"])
+@login_required
+def excluir_chamado(chamado_id):
+    conn = get_db()
+    conn.execute("DELETE FROM historico WHERE chamado_id = ?", (chamado_id,))
+    conn.execute("DELETE FROM chamados WHERE id = ?", (chamado_id,))
+    conn.commit()
+    conn.close()
     return redirect(url_for("index"))
 
 
@@ -297,22 +307,14 @@ def api_historico(chamado_id):
     chamado = conn.execute("SELECT * FROM chamados WHERE id = ?", (chamado_id,)).fetchone()
     if not chamado:
         conn.close()
-        return {"ok": False, "erro": "nao_encontrado"}, 404
+        return jsonify({"ok": False, "erro": "nao_encontrado"}), 404
     historico = conn.execute(
         "SELECT * FROM historico WHERE chamado_id = ? ORDER BY data DESC",
         (chamado_id,),
     ).fetchall()
     conn.close()
 
-    itens = [{
-        "campo": h["campo"],
-        "de": h["valor_antigo"],
-        "para": h["valor_novo"],
-        "usuario": h["usuario"],
-        "data": formatar_data_br(h["data"]),
-    } for h in historico]
-
-    return {
+    return jsonify({
         "ok": True,
         "chamado": {
             "id": chamado["id"],
@@ -322,12 +324,17 @@ def api_historico(chamado_id):
             "setor_responsavel": chamado["setor_responsavel"],
             "status": chamado["status"],
         },
-        "historico": itens,
-    }
+        "historico": [{
+            "campo": h["campo"],
+            "de": h["valor_antigo"],
+            "para": h["valor_novo"],
+            "usuario": h["usuario"],
+            "data": formatar_data_br(h["data"]),
+        } for h in historico],
+    })
 
 
 # ============ RELATÓRIOS ============
-
 @app.route("/relatorios")
 def relatorios():
     return render_template("relatorios.html")
@@ -335,9 +342,7 @@ def relatorios():
 
 def _buscar_chamados_para_relatorio():
     conn = get_db()
-    chamados = conn.execute(
-        "SELECT * FROM chamados ORDER BY data_solicitacao DESC"
-    ).fetchall()
+    chamados = conn.execute("SELECT * FROM chamados ORDER BY data_solicitacao DESC").fetchall()
     conn.close()
     return chamados
 
@@ -360,17 +365,14 @@ def gerar_relatorio():
     formato = request.args.get("formato", "csv").lower()
     if formato not in ("csv", "xlsx", "pdf"):
         formato = "csv"
-
     chamados = _buscar_chamados_para_relatorio()
     dados = [_dados_do_chamado(c) for c in chamados]
     data_geracao = datetime.now(FUSO_BRASIL).strftime("%d/%m/%Y às %H:%M")
-
     if formato == "csv":
         return _gerar_csv(dados, data_geracao)
     elif formato == "xlsx":
         return _gerar_xlsx(dados, data_geracao)
-    else:
-        return _gerar_pdf(dados, data_geracao)
+    return _gerar_pdf(dados, data_geracao)
 
 
 def _gerar_csv(dados, data_geracao):
@@ -383,48 +385,36 @@ def _gerar_csv(dados, data_geracao):
     writer.writerow(["ID", "Data", "Solicitante", "Setor Solicitante",
                      "Item", "Setor Responsável", "Responsável", "Status"])
     for d in dados:
-        writer.writerow([d["id"], d["data"], d["solicitante"],
-                         d["setor_solicitante"], d["item"],
-                         d["setor_responsavel"], d["responsavel"], d["status"]])
-
+        writer.writerow([d["id"], d["data"], d["solicitante"], d["setor_solicitante"],
+                         d["item"], d["setor_responsavel"], d["responsavel"], d["status"]])
     output.seek(0)
     bytes_io = io.BytesIO(output.getvalue().encode("utf-8-sig"))
-    return send_file(
-        bytes_io,
-        mimetype="text/csv",
-        as_attachment=True,
-        download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-    )
+    return send_file(bytes_io, mimetype="text/csv", as_attachment=True,
+                     download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.csv")
 
 
 def _gerar_xlsx(dados, data_geracao):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
-
     wb = Workbook()
     ws = wb.active
     ws.title = "Chamados"
-
     ws.merge_cells("A1:H1")
     ws["A1"] = "Relatório de Chamados"
     ws["A1"].font = Font(size=14, bold=True)
     ws["A1"].alignment = Alignment(horizontal="center")
-
     ws.merge_cells("A2:H2")
     ws["A2"] = f"Gerado em {data_geracao} • Total: {len(dados)} chamado(s)"
     ws["A2"].alignment = Alignment(horizontal="center")
-
     cabecalhos = ["ID", "Data", "Solicitante", "Setor Solicitante",
                   "Item", "Setor Responsável", "Responsável", "Status"]
     header_fill = PatternFill("solid", fgColor="4F46E5")
     header_font = Font(bold=True, color="FFFFFF")
-
     for col, cab in enumerate(cabecalhos, start=1):
         cell = ws.cell(row=4, column=col, value=cab)
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center")
-
     for i, d in enumerate(dados, start=5):
         ws.cell(row=i, column=1, value=d["id"])
         ws.cell(row=i, column=2, value=d["data"])
@@ -434,51 +424,37 @@ def _gerar_xlsx(dados, data_geracao):
         ws.cell(row=i, column=6, value=d["setor_responsavel"])
         ws.cell(row=i, column=7, value=d["responsavel"])
         ws.cell(row=i, column=8, value=d["status"])
-
-    larguras = [6, 18, 20, 20, 40, 20, 20, 15]
-    for i, w in enumerate(larguras, start=1):
+    for i, w in enumerate([6, 18, 20, 20, 40, 20, 20, 15], start=1):
         ws.column_dimensions[chr(64 + i)].width = w
-
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    return send_file(
-        output,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-    )
+    return send_file(output,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True,
+                     download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx")
 
 
 def _gerar_pdf(dados, data_geracao):
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
-                                    Paragraph, Spacer)
-
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     output = io.BytesIO()
     doc = SimpleDocTemplate(output, pagesize=landscape(A4),
-                            leftMargin=20, rightMargin=20,
-                            topMargin=20, bottomMargin=20)
+                            leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
     styles = getSampleStyleSheet()
-    elementos = []
-
-    elementos.append(Paragraph("<b>Relatório de Chamados</b>", styles["Title"]))
-    elementos.append(Paragraph(
-        f"Gerado em {data_geracao} • Total: {len(dados)} chamado(s)",
-        styles["Normal"]))
-    elementos.append(Spacer(1, 12))
-
+    elementos = [
+        Paragraph("<b>Relatório de Chamados</b>", styles["Title"]),
+        Paragraph(f"Gerado em {data_geracao} • Total: {len(dados)} chamado(s)", styles["Normal"]),
+        Spacer(1, 12),
+    ]
     cabecalho = ["ID", "Data", "Solicitante", "Setor Solicitante",
                  "Item", "Setor Responsável", "Responsável", "Status"]
     linhas = [cabecalho]
     for d in dados:
-        linhas.append([
-            str(d["id"]), d["data"], d["solicitante"], d["setor_solicitante"],
-            d["item"], d["setor_responsavel"], d["responsavel"], d["status"],
-        ])
-
+        linhas.append([str(d["id"]), d["data"], d["solicitante"], d["setor_solicitante"],
+                       d["item"], d["setor_responsavel"], d["responsavel"], d["status"]])
     tabela = Table(linhas, repeatRows=1, colWidths=[30, 80, 90, 80, 170, 80, 80, 60])
     tabela.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F46E5")),
@@ -493,30 +469,22 @@ def _gerar_pdf(dados, data_geracao):
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
     ]))
     elementos.append(tabela)
-
     doc.build(elementos)
     output.seek(0)
-    return send_file(
-        output,
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-    )
+    return send_file(output, mimetype="application/pdf", as_attachment=True,
+                     download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf")
 
 
 if __name__ == "__main__":
     import socket
-
     init_db()
     try:
         ip_local = socket.gethostbyname(socket.gethostname())
     except Exception:
         ip_local = "127.0.0.1"
-
     print("=" * 50)
     print("Sistema de Chamados rodando.")
     print(f"Neste computador:        http://localhost:5000")
     print(f"Outros PCs da mesma rede: http://{ip_local}:5000")
     print("=" * 50)
-
     app.run(host="0.0.0.0", port=5000, debug=True)
