@@ -6,7 +6,7 @@ import os
 
 # --- Conexão com o Turso (produção) ou SQLite local (desenvolvimento) ---
 try:
-    import libsql
+    import libsql_client
     HAS_LIBSQL = True
 except ImportError:
     HAS_LIBSQL = False
@@ -58,14 +58,66 @@ def classificar_setor(item_texto):
     return "Não classificado"
 
 
+# ---------- Classes de adaptação para o Turso ----------
+class RowWrapper:
+    """Simula o comportamento de sqlite3.Row (acesso por atributo)."""
+    def __init__(self, columns, values):
+        self._columns = columns
+        self._values = values
+        for col, val in zip(columns, values):
+            setattr(self, col, val)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return getattr(self, key)
+
+
+class TursoCursor:
+    """Adapta o resultado do libsql-client para se parecer com sqlite3.Cursor."""
+    def __init__(self, result):
+        self._rows = result.rows
+        self._columns = result.columns
+
+    def fetchall(self):
+        return [RowWrapper(self._columns, row) for row in self._rows]
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return RowWrapper(self._columns, self._rows[0])
+
+
+class TursoConnection:
+    """Adapta a API do libsql-client para se parecer com sqlite3.Connection."""
+    def __init__(self, client):
+        self.client = client
+
+    def execute(self, query, params=None):
+        params = params or []
+        result = self.client.execute(query, params)
+        return TursoCursor(result)
+
+    def commit(self):
+        # libsql-client já faz commit automático em cada execute
+        pass
+
+    def close(self):
+        pass
+
+
 def get_db():
     """Conecta no Turso (produção) ou no SQLite local (desenvolvimento)."""
     if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and HAS_LIBSQL:
-        conn = libsql.connect(TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+        client = libsql_client.create_client_sync(
+            url=TURSO_DATABASE_URL,
+            auth_token=TURSO_AUTH_TOKEN,
+        )
+        return TursoConnection(client)
     else:
         conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def agora_utc_str():
