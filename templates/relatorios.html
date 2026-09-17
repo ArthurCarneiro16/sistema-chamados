@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+    <h2>Gerar Relatório</h2>
+    <span class="contador">Exportar todos os chamados</span>
+</div>
+
+<div class="card relatorio-card">
+    <p class="relatorio-desc">
+        Escolha o formato desejado. O relatório inclui <strong>todos os chamados</strong>
+        cadastrados, com data de geração e total.
+    </p>
+
+    <div class="relatorio-opcoes">
+        <a href="{{ url_for('gerar_relatorio', formato='csv') }}" class="relatorio-btn">
+            <span class="relatorio-icone">📄</span>
+            <span class="relatorio-titulo">CSV</span>
+            <span class="relatorio-sub">Abre no Excel e Google Sheets</span>
+        </a>
+
+        <a href="{{ url_for('gerar_relatorio', formato='xlsx') }}" class="relatorio-btn">
+            <span class="relatorio-icone">📊</span>
+            <span class="relatorio-titulo">Excel (XLSX)</span>
+            <span class="relatorio-sub">Planilha com formatação</span>
+        </a>
+
+        <a href="{{ url_for('gerar_relatorio', formato='pdf') }}" class="relatorio-btn">
+            <span class="relatorio-icone">📕</span>
+            <span class="relatorio-titulo">PDF</span>
+            <span class="relatorio-sub">Ideal para imprimir ou arquivar</span>
+        </a>
+    </div>
+</div>
+
+{% endblock %}

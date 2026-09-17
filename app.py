@@ -1,8 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, send_file
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import sqlite3
 import os
+import csv
+import io
 
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "chamados.db")
@@ -11,8 +13,6 @@ FUSO_BRASIL = ZoneInfo("America/Sao_Paulo")
 SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
 STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
 
-# Palavra-chave -> setor responsável. O sistema decide sozinho quem atende,
-# quem abre o chamado não escolhe isso.
 CLASSIFICACAO = {
     "Almoxarifado": [
         "mouse", "teclado", "monitor", "cadeira", "mesa", "papel", "caneta",
@@ -57,12 +57,10 @@ def get_db():
 
 
 def agora_utc_str():
-    """Timestamp atual em UTC, no formato salvo no banco."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def formatar_data_br(data_iso):
-    """Converte um timestamp UTC salvo no banco para horário de Brasília."""
     try:
         dt_utc = datetime.strptime(data_iso, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         dt_br = dt_utc.astimezone(FUSO_BRASIL)
@@ -172,6 +170,184 @@ def atualizar_status(chamado_id):
     conn.commit()
     conn.close()
     return redirect(url_for("index"))
+
+
+# ============ RELATÓRIOS ============
+
+@app.route("/relatorios")
+def relatorios():
+    return render_template("relatorios.html")
+
+
+def _buscar_chamados_para_relatorio():
+    conn = get_db()
+    chamados = conn.execute(
+        "SELECT * FROM chamados ORDER BY data_solicitacao DESC"
+    ).fetchall()
+    conn.close()
+    return chamados
+
+
+def _dados_do_chamado(c):
+    return {
+        "id": c["id"],
+        "data": formatar_data_br(c["data_solicitacao"]),
+        "solicitante": c["nome_solicitante"],
+        "setor_solicitante": c["setor_solicitante"],
+        "item": c["item_solicitado"],
+        "setor_responsavel": c["setor_responsavel"],
+        "responsavel": c["nome_responsavel"] or "—",
+        "status": c["status"],
+    }
+
+
+@app.route("/relatorios/gerar")
+def gerar_relatorio():
+    formato = request.args.get("formato", "csv").lower()
+    if formato not in ("csv", "xlsx", "pdf"):
+        formato = "csv"
+
+    chamados = _buscar_chamados_para_relatorio()
+    dados = [_dados_do_chamado(c) for c in chamados]
+    data_geracao = datetime.now(FUSO_BRASIL).strftime("%d/%m/%Y às %H:%M")
+
+    if formato == "csv":
+        return _gerar_csv(dados, data_geracao)
+    elif formato == "xlsx":
+        return _gerar_xlsx(dados, data_geracao)
+    else:
+        return _gerar_pdf(dados, data_geracao)
+
+
+def _gerar_csv(dados, data_geracao):
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";")
+    writer.writerow(["Relatório de Chamados"])
+    writer.writerow([f"Gerado em: {data_geracao}"])
+    writer.writerow([f"Total: {len(dados)} chamado(s)"])
+    writer.writerow([])
+    writer.writerow(["ID", "Data", "Solicitante", "Setor Solicitante",
+                     "Item", "Setor Responsável", "Responsável", "Status"])
+    for d in dados:
+        writer.writerow([d["id"], d["data"], d["solicitante"],
+                         d["setor_solicitante"], d["item"],
+                         d["setor_responsavel"], d["responsavel"], d["status"]])
+
+    output.seek(0)
+    bytes_io = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    return send_file(
+        bytes_io,
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+    )
+
+
+def _gerar_xlsx(dados, data_geracao):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Chamados"
+
+    ws.merge_cells("A1:H1")
+    ws["A1"] = "Relatório de Chamados"
+    ws["A1"].font = Font(size=14, bold=True)
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    ws.merge_cells("A2:H2")
+    ws["A2"] = f"Gerado em {data_geracao} • Total: {len(dados)} chamado(s)"
+    ws["A2"].alignment = Alignment(horizontal="center")
+
+    cabecalhos = ["ID", "Data", "Solicitante", "Setor Solicitante",
+                  "Item", "Setor Responsável", "Responsável", "Status"]
+    header_fill = PatternFill("solid", fgColor="4F46E5")
+    header_font = Font(bold=True, color="FFFFFF")
+
+    for col, cab in enumerate(cabecalhos, start=1):
+        cell = ws.cell(row=4, column=col, value=cab)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    for i, d in enumerate(dados, start=5):
+        ws.cell(row=i, column=1, value=d["id"])
+        ws.cell(row=i, column=2, value=d["data"])
+        ws.cell(row=i, column=3, value=d["solicitante"])
+        ws.cell(row=i, column=4, value=d["setor_solicitante"])
+        ws.cell(row=i, column=5, value=d["item"])
+        ws.cell(row=i, column=6, value=d["setor_responsavel"])
+        ws.cell(row=i, column=7, value=d["responsavel"])
+        ws.cell(row=i, column=8, value=d["status"])
+
+    larguras = [6, 18, 20, 20, 40, 20, 20, 15]
+    for i, w in enumerate(larguras, start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+    )
+
+
+def _gerar_pdf(dados, data_geracao):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                    Paragraph, Spacer)
+
+    output = io.BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=landscape(A4),
+                            leftMargin=20, rightMargin=20,
+                            topMargin=20, bottomMargin=20)
+    styles = getSampleStyleSheet()
+    elementos = []
+
+    elementos.append(Paragraph("<b>Relatório de Chamados</b>", styles["Title"]))
+    elementos.append(Paragraph(
+        f"Gerado em {data_geracao} • Total: {len(dados)} chamado(s)",
+        styles["Normal"]))
+    elementos.append(Spacer(1, 12))
+
+    cabecalho = ["ID", "Data", "Solicitante", "Setor Solicitante",
+                 "Item", "Setor Responsável", "Responsável", "Status"]
+    linhas = [cabecalho]
+    for d in dados:
+        linhas.append([
+            str(d["id"]), d["data"], d["solicitante"], d["setor_solicitante"],
+            d["item"], d["setor_responsavel"], d["responsavel"], d["status"],
+        ])
+
+    tabela = Table(linhas, repeatRows=1, colWidths=[30, 80, 90, 80, 170, 80, 80, 60])
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4F46E5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3F4F8")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elementos.append(tabela)
+
+    doc.build(elementos)
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"relatorio_chamados_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+    )
 
 
 if __name__ == "__main__":
