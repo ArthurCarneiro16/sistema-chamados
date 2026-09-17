@@ -1,6 +1,7 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file
+from flask import Flask, render_template, request, redirect, url_for, send_file, session, flash
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from functools import wraps
 import sqlite3
 import os
 import csv
@@ -11,12 +12,17 @@ app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "chamados.db")
 FUSO_BRASIL = ZoneInfo("America/Sao_Paulo")
 
-SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
-STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
+# --- Segurança (via variáveis de ambiente) ---
+app.secret_key = os.environ.get("SECRET_KEY") or "dev-secret-mude-em-producao"
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
 
 # --- Telegram ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
+SETORES = ["TI", "Almoxarifado", "RH", "Financeiro", "ADM", "Manutenção"]
+STATUS_OPCOES = ["Aberto", "Em andamento", "Concluído"]
 
 CLASSIFICACAO = {
     "Almoxarifado": [
@@ -77,8 +83,58 @@ def formatar_data_br(data_iso):
 app.jinja_env.filters["br_data"] = formatar_data_br
 
 
+# --- Autenticação ---
+def login_required_api(f):
+    """Para rotas AJAX: retorna 401 se não estiver logado."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("logado"):
+            return {"ok": False, "erro": "precisa_login"}, 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.context_processor
+def injetar_estado_login():
+    return {"logado": bool(session.get("logado")), "usuario": session.get("usuario", "")}
+
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    dados = request.get_json(silent=True) or {}
+    usuario = (dados.get("usuario") or "").strip()
+    senha = dados.get("senha") or ""
+    if usuario == ADMIN_USER and senha == ADMIN_PASSWORD:
+        session["logado"] = True
+        session["usuario"] = usuario
+        return {"ok": True, "usuario": usuario}
+    return {"ok": False, "erro": "credenciais_invalidas"}, 401
+
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.clear()
+    return {"ok": True}
+
+
+# --- Histórico ---
+def registrar_historico(conn, chamado_id, campo, valor_antigo, valor_novo):
+    conn.execute(
+        """INSERT INTO historico
+           (chamado_id, campo, valor_antigo, valor_novo, usuario, data)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            chamado_id,
+            campo,
+            valor_antigo or "—",
+            valor_novo or "—",
+            session.get("usuario", "sistema"),
+            agora_utc_str(),
+        ),
+    )
+
+
 def enviar_notificacao_telegram(mensagem):
-    """Envia mensagem via Telegram se as variáveis estiverem configuradas."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -106,6 +162,17 @@ def init_db():
             setor_responsavel TEXT NOT NULL,
             nome_responsavel TEXT,
             status TEXT NOT NULL DEFAULT 'Aberto'
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS historico (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chamado_id INTEGER NOT NULL,
+            campo TEXT NOT NULL,
+            valor_antigo TEXT,
+            valor_novo TEXT,
+            usuario TEXT NOT NULL,
+            data TEXT NOT NULL
         )
     """)
     conn.commit()
@@ -179,7 +246,6 @@ def novo_chamado():
         conn.commit()
         conn.close()
 
-        # Notifica via Telegram
         data_br = datetime.now(FUSO_BRASIL).strftime("%d/%m/%Y às %H:%M")
         mensagem = (
             f"🔔 <b>Novo chamado #{novo_id}</b>\n\n"
@@ -197,17 +263,67 @@ def novo_chamado():
 
 
 @app.route("/chamado/<int:chamado_id>/status", methods=["POST"])
+@login_required_api
 def atualizar_status(chamado_id):
     novo_status = request.form["status"]
     nome_responsavel = request.form.get("nome_responsavel", "")
+
     conn = get_db()
+    chamado = conn.execute("SELECT * FROM chamados WHERE id = ?", (chamado_id,)).fetchone()
+    if not chamado:
+        conn.close()
+        return {"ok": False, "erro": "nao_encontrado"}, 404
+
+    if chamado["status"] != novo_status:
+        registrar_historico(conn, chamado_id, "status", chamado["status"], novo_status)
+    if (chamado["nome_responsavel"] or "") != nome_responsavel:
+        registrar_historico(conn, chamado_id, "responsável", chamado["nome_responsavel"], nome_responsavel)
+
     conn.execute(
         "UPDATE chamados SET status = ?, nome_responsavel = ? WHERE id = ?",
         (novo_status, nome_responsavel, chamado_id),
     )
     conn.commit()
     conn.close()
+
+    if request.headers.get("X-Requested-With") == "fetch":
+        return {"ok": True}
     return redirect(url_for("index"))
+
+
+@app.route("/api/chamado/<int:chamado_id>/historico")
+def api_historico(chamado_id):
+    conn = get_db()
+    chamado = conn.execute("SELECT * FROM chamados WHERE id = ?", (chamado_id,)).fetchone()
+    if not chamado:
+        conn.close()
+        return {"ok": False, "erro": "nao_encontrado"}, 404
+    historico = conn.execute(
+        "SELECT * FROM historico WHERE chamado_id = ? ORDER BY data DESC",
+        (chamado_id,),
+    ).fetchall()
+    conn.close()
+
+    itens = [{
+        "campo": h["campo"],
+        "de": h["valor_antigo"],
+        "para": h["valor_novo"],
+        "usuario": h["usuario"],
+        "data": formatar_data_br(h["data"]),
+    } for h in historico]
+
+    return {
+        "ok": True,
+        "chamado": {
+            "id": chamado["id"],
+            "solicitante": chamado["nome_solicitante"],
+            "setor_solicitante": chamado["setor_solicitante"],
+            "item": chamado["item_solicitado"],
+            "setor_responsavel": chamado["setor_responsavel"],
+            "status": chamado["status"],
+        },
+        "historico": itens,
+    }
 
 
 # ============ RELATÓRIOS ============

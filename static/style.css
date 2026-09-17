@@ -49,7 +49,7 @@ header {
     letter-spacing: -0.02em;
 }
 .brand-icon { color: #a5b4fc; }
-nav { display: flex; align-items: center; gap: 20px; }
+nav { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 nav a {
     color: #c7d2fe;
     text-decoration: none;
@@ -65,6 +65,36 @@ nav a:hover { color: white; }
     font-weight: 600 !important;
 }
 .nav-cta:hover { background: var(--primary-dark); }
+
+.nav-user {
+    color: #c7d2fe;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.nav-login, .nav-logout {
+    background: transparent;
+    border: 1px solid #6366f1;
+    color: #e0e7ff;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+.nav-login:hover, .nav-logout:hover {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: white;
+}
+.nav-logout {
+    border-color: #f87171;
+    color: #fecaca;
+}
+.nav-logout:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+}
 
 /* ---------- layout ---------- */
 main {
@@ -126,7 +156,7 @@ button:hover { background: var(--primary-dark); }
 }
 table {
     width: 100%;
-    min-width: 880px;
+    min-width: 900px;
     border-collapse: collapse;
     font-size: 0.87rem;
 }
@@ -148,6 +178,7 @@ th {
 }
 tbody tr:hover { background: #f9fafb; }
 .col-id { width: 40px; color: var(--text-muted); }
+.col-acoes { width: 60px; text-align: center; }
 .vazio { text-align: center; color: var(--text-muted); padding: 32px; }
 
 .th-link {
@@ -178,6 +209,10 @@ tbody tr:hover { background: #f9fafb; }
 .tag-alerta { background: #fef3c7; color: #92400e; }
 
 .form-inline input[type="text"] { width: 110px; }
+.somente-leitura {
+    color: var(--text-muted);
+    font-style: italic;
+}
 
 .status-select {
     font-weight: 600;
@@ -189,6 +224,32 @@ tbody tr:hover { background: #f9fafb; }
 .status-select.status-aberto { background: var(--aberto-bg); color: var(--aberto); }
 .status-select.status-em-andamento { background: var(--andamento-bg); color: var(--andamento); }
 .status-select.status-concluído { background: var(--concluido-bg); color: var(--concluido); }
+
+.status-badge {
+    display: inline-block;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+}
+.status-badge.status-aberto { background: var(--aberto-bg); color: var(--aberto); }
+.status-badge.status-em-andamento { background: var(--andamento-bg); color: var(--andamento); }
+.status-badge.status-concluído { background: var(--concluido-bg); color: var(--concluido); }
+
+/* ---------- botão histórico ---------- */
+.btn-historico {
+    background: #eef2ff;
+    color: var(--primary);
+    border: none;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 1rem;
+    cursor: pointer;
+}
+.btn-historico:hover {
+    background: var(--primary);
+    color: white;
+}
 
 /* ---------- formulário novo chamado ---------- */
 .form-novo {
@@ -230,11 +291,15 @@ tbody tr:hover { background: #f9fafb; }
     background: white;
     border-radius: 12px;
     width: 100%;
-    max-width: 560px;
+    max-width: 620px;
     box-shadow: 0 20px 50px rgba(0,0,0,0.25);
     overflow: hidden;
     animation: modalIn 0.15s ease-out;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
 }
+.modal-caixa-pequena { max-width: 380px; }
 @keyframes modalIn {
     from { opacity: 0; transform: translateY(-8px) scale(0.98); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -257,14 +322,100 @@ tbody tr:hover { background: #f9fafb; }
 .modal-fechar:hover { color: var(--text); }
 .modal-corpo {
     padding: 20px;
-    max-height: 60vh;
     overflow-y: auto;
 }
 .modal-corpo p {
+    margin: 0 0 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.55;
+}
+#modalTexto {
     margin: 0;
     white-space: pre-wrap;
     word-break: break-word;
     line-height: 1.55;
+}
+
+/* ---------- formulário de login ---------- */
+.form-login {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.form-login label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-top: 4px;
+}
+.form-login button {
+    margin-top: 12px;
+    padding: 10px;
+}
+.login-erro {
+    background: #fee2e2;
+    color: #991b1b;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.83rem;
+    margin-top: 8px;
+}
+
+/* ---------- histórico (dentro do modal) ---------- */
+.historico-info {
+    background: #f9fafb;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+.historico-info p {
+    margin: 4px 0;
+    font-size: 0.88rem;
+}
+.historico-titulo {
+    margin: 0 0 10px;
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.historico-lista {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.historico-item {
+    border-left: 3px solid var(--primary);
+    padding: 8px 12px;
+    background: #f9fafb;
+    border-radius: 0 8px 8px 0;
+}
+.historico-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+.historico-mudanca {
+    font-size: 0.88rem;
+}
+.historico-mudanca .de {
+    color: var(--text-muted);
+    text-decoration: line-through;
+}
+.historico-mudanca .seta {
+    color: var(--primary);
+    font-weight: 700;
+    margin: 0 6px;
+}
+.historico-mudanca .para {
+    color: var(--concluido);
+    font-weight: 600;
 }
 
 /* ---------- relatórios ---------- */
@@ -312,4 +463,5 @@ tbody tr:hover { background: #f9fafb; }
     .header-inner { flex-direction: column; align-items: flex-start; }
     main { padding: 16px; }
     .item-truncado { max-width: 180px; }
+    .modal-caixa { max-width: 100%; }
 }

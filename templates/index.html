@@ -47,6 +47,7 @@
                     <th class="col-setor">Setor responsável</th>
                     <th class="col-nome">Responsável</th>
                     <th class="col-status">Status</th>
+                    <th class="col-acoes">Histórico</th>
                 </tr>
             </thead>
             <tbody>
@@ -68,16 +69,20 @@
                             {{ c.setor_responsavel }}
                         </span>
                     </td>
-                    <td class="col-nome" colspan="1">
+                    <td class="col-nome">
+                        {% if logado %}
                         <form method="post" action="{{ url_for('atualizar_status', chamado_id=c.id) }}" class="form-inline" id="form-{{ c.id }}">
                             <input type="text" name="nome_responsavel" placeholder="—"
                                    value="{{ c.nome_responsavel or '' }}"
                                    data-original="{{ c.nome_responsavel or '' }}"
-                                   form="form-{{ c.id }}"
                                    onchange="if(this.value !== this.dataset.original){ this.form.submit(); }">
                         </form>
+                        {% else %}
+                        <span class="somente-leitura">{{ c.nome_responsavel or '—' }}</span>
+                        {% endif %}
                     </td>
                     <td class="col-status">
+                        {% if logado %}
                         <select name="status" form="form-{{ c.id }}"
                                 class="status-select status-{{ c.status|replace(' ', '-')|lower }}"
                                 onchange="this.className='status-select status-' + this.value.replace(' ', '-').toLowerCase(); this.form.submit();">
@@ -85,10 +90,18 @@
                             <option value="{{ s }}" {% if s == c.status %}selected{% endif %}>{{ s }}</option>
                             {% endfor %}
                         </select>
+                        {% else %}
+                        <span class="status-badge status-{{ c.status|replace(' ', '-')|lower }}">{{ c.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="col-acoes">
+                        <button type="button" class="btn-historico" title="Ver histórico" onclick="abrirHistorico({{ c.id }})">
+                            📜
+                        </button>
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8" class="vazio">Nenhum chamado encontrado.</td></tr>
+                <tr><td colspan="9" class="vazio">Nenhum chamado encontrado.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -108,24 +121,92 @@
     </div>
 </div>
 
+<!-- ============ MODAL DE HISTÓRICO ============ -->
+<div id="modalHistorico" class="modal-overlay" onclick="if(event.target === this) fecharHistorico()">
+    <div class="modal-caixa">
+        <div class="modal-header">
+            <h3 id="historicoTitulo">Histórico do chamado</h3>
+            <span class="modal-fechar" onclick="fecharHistorico()">&times;</span>
+        </div>
+        <div class="modal-corpo">
+            <div id="historicoInfo" class="historico-info"></div>
+            <div id="historicoLista" class="historico-lista-wrap"></div>
+        </div>
+    </div>
+</div>
+
 <script>
+    // ---- Modal do item ----
     document.addEventListener('DOMContentLoaded', function () {
-        // Abre o modal ao clicar em qualquer item truncado
         document.querySelectorAll('.item-truncado').forEach(function (el) {
             el.addEventListener('click', function () {
                 document.getElementById('modalTexto').textContent = this.dataset.item || '';
                 document.getElementById('modalItem').classList.add('aberto');
             });
         });
-
-        // Fecha com ESC
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') fecharModal();
-        });
     });
 
     function fecharModal() {
         document.getElementById('modalItem').classList.remove('aberto');
+    }
+
+    // ---- Modal do histórico ----
+    async function abrirHistorico(id) {
+        try {
+            const resposta = await fetch(`/api/chamado/${id}/historico`);
+            if (!resposta.ok) {
+                alert('Não foi possível carregar o histórico.');
+                return;
+            }
+            const dados = await resposta.json();
+
+            document.getElementById('historicoTitulo').textContent = `Histórico do chamado #${dados.chamado.id}`;
+
+            const info = document.getElementById('historicoInfo');
+            info.innerHTML = `
+                <p><strong>Solicitante:</strong> ${escapeHtml(dados.chamado.solicitante)}</p>
+                <p><strong>Setor solicitante:</strong> ${escapeHtml(dados.chamado.setor_solicitante)}</p>
+                <p><strong>Item:</strong> ${escapeHtml(dados.chamado.item)}</p>
+                <p><strong>Setor responsável:</strong> ${escapeHtml(dados.chamado.setor_responsavel)}</p>
+                <p><strong>Status atual:</strong> ${escapeHtml(dados.chamado.status)}</p>
+            `;
+
+            const lista = document.getElementById('historicoLista');
+            if (dados.historico.length === 0) {
+                lista.innerHTML = '<p class="vazio">Nenhuma mudança registrada ainda.</p>';
+            } else {
+                lista.innerHTML = '<h4 class="historico-titulo">Mudanças registradas</h4><ul class="historico-lista">' +
+                    dados.historico.map(h => `
+                        <li class="historico-item">
+                            <div class="historico-meta">
+                                <span class="historico-data">${escapeHtml(h.data)}</span>
+                                <span class="historico-user">👤 ${escapeHtml(h.usuario)}</span>
+                            </div>
+                            <div class="historico-mudanca">
+                                <strong>${escapeHtml(h.campo)}</strong>:
+                                <span class="de">${escapeHtml(h.de)}</span>
+                                <span class="seta">→</span>
+                                <span class="para">${escapeHtml(h.para)}</span>
+                            </div>
+                        </li>
+                    `).join('') + '</ul>';
+            }
+
+            document.getElementById('modalHistorico').classList.add('aberto');
+        } catch (e) {
+            console.error(e);
+            alert('Erro ao carregar histórico.');
+        }
+    }
+
+    function fecharHistorico() {
+        document.getElementById('modalHistorico').classList.remove('aberto');
+    }
+
+    function escapeHtml(texto) {
+        const div = document.createElement('div');
+        div.textContent = texto == null ? '' : String(texto);
+        return div.innerHTML;
     }
 </script>
 
